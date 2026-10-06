@@ -23,6 +23,7 @@ V3 = os.path.join(CE, "images_v3")  # new-style pictures (PNG, generated from pr
 read_caps = lambda p: {r[0]: r[1] for r in csv.reader(open(p, encoding="utf-8"), delimiter="\t") if len(r) > 1} if os.path.exists(p) else {}
 cap = {**read_caps(os.path.join(CE, "images", "captions.tsv")), **read_caps(os.path.join(V3, "captions.tsv"))}
 used_figs = set()
+ORDER = {}  # figure id -> its number in page order within its module
 
 
 def fig_source(i):
@@ -42,7 +43,7 @@ def figure(m):
     if not fig_source(i):
         return ""  # figure not drawn yet; skip it rather than show a broken image
     used_figs.add(i)
-    num = f"{int(i[1:3])}.{int(i[4:6])}"
+    num = f"{int(i[1:3])}.{ORDER.get(i, int(i[4:6]))}"
     c = html.escape(cap.get(i, ""))
     return f'\n<figure><img src="img/{i}.png" alt="Figure {num}. {c}" loading="lazy"><figcaption><b>Figure {num}.</b> {c}</figcaption></figure>\n'
 
@@ -259,6 +260,8 @@ def parse_quiz(practice, answers, n):
 
 def build_module(n):
     t = open(os.path.join(CE, f"module{n:02d}_v2.md"), encoding="utf-8").read()
+    for k, i in enumerate(re.findall(r"^> \[ILLUSTRATION ([A-Z0-9-]+):", t, re.M), 1):
+        ORDER[i] = k
     title = t.split("\n", 1)[0].lstrip("# ").strip()
     title = re.sub(r"^Module \d+ — ", "", title)
     practice = answers_q = ""
