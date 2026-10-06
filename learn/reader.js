@@ -32,7 +32,7 @@ const Reader = (() => {
     idx = i;
     if (idx >= queue.length) return stop();
     const text = textOf(queue[idx]);
-    if (!text) return speak(idx + 1);
+    if (!text || queue[idx].closest("[hidden]")) return speak(idx + 1); // skip answer feedback until it's shown
     const u = new SpeechSynthesisUtterance(text);
     const v = bestVoice(); if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = rate;
@@ -62,8 +62,8 @@ const Reader = (() => {
   function attach(article, mount) {
     stop(); idx = 0;
     if (!synth) { mount.innerHTML = `<p class="muted">Read-aloud isn't available in this browser.</p>`; return; }
-    queue = [...article.querySelectorAll("h1, h2, h3, h4, p, li, figcaption, td, th, blockquote")]
-      .filter((el) => !el.closest("li li") && !el.querySelector("p, li") && textOf(el));
+    queue = [...article.querySelectorAll("h1, h2, h3, h4, p, li, figcaption, td, th, blockquote, .mcq-head, .mcq-opts .opt")]
+      .filter((el) => !el.closest("li li") && !el.querySelector("p, li") && (textOf(el) || el.closest("[hidden]")));
     mount.innerHTML = `<div class="reader" role="group" aria-label="Read this lesson aloud">
       <button class="btn" data-act="play" type="button">▶ Listen</button>
       <button class="btn sec" data-act="stop" type="button" disabled>■ Stop</button>
@@ -81,7 +81,8 @@ const Reader = (() => {
     bar.querySelector("[data-act=stop]").addEventListener("click", () => { stop(); idx = 0; });
     bar.querySelector("[data-act=rate]").addEventListener("change", (e) => { rate = Number(e.target.value); pref("rate", rate); if (playing && !paused) speak(idx); });
     bar.querySelector("[data-act=voice]").addEventListener("change", (e) => { voiceName = e.target.value; pref("voice", voiceName); if (playing && !paused) speak(idx); });
-    queue.forEach((el, i) => el.addEventListener("click", (e) => { if (e.target.closest("a")) return; speak(i); }));
+    // Clicking text starts reading there, except on links, answer choices, and glossary terms.
+    queue.forEach((el, i) => el.addEventListener("click", (e) => { if (e.target.closest("a, .mcq, .term")) return; speak(i); }));
     update();
   }
 

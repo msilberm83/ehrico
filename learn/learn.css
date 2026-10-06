@@ -47,3 +47,23 @@ figure{margin:16px 0}figcaption{font-size:14px;color:var(--muted)}
 .lesson .speaking{background:#FDF3EA;outline:3px solid var(--orange);outline-offset:3px;border-radius:4px}
 @media (prefers-color-scheme:dark){.lesson .speaking{background:#3a2a1a}}
 .lesson p,.lesson li,.lesson td,.lesson figcaption{cursor:pointer}
+
+/* In-lesson exam-style questions */
+.mcq{background:var(--card);border:1px solid var(--gray);border-left:5px solid var(--teal);border-radius:12px;padding:14px 16px;margin:16px 0}
+.mcq-head{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:14px;font-weight:700;color:var(--navy);margin-bottom:4px}
+@media (prefers-color-scheme:dark){.mcq-head{color:#9ec5e8}}
+.mcq-exam{font-weight:600;font-size:12px;padding:2px 8px;border-radius:20px;background:var(--gray);color:var(--ink)}
+.mcq-stem p{margin:6px 0}
+.mcq .opt{margin:6px 0}
+.mcq .opt:disabled{cursor:default}
+.mcq .opt.right{background:color-mix(in srgb,var(--good) 12%,var(--bg))}
+.mcq .opt.wrong{background:color-mix(in srgb,var(--bad) 10%,var(--bg))}
+.mcq-fb{margin-top:10px;padding:10px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--gray)}
+.mcq-fb b.ok{color:var(--good)}.mcq-fb b.no{color:var(--bad)}
+.mcq-explain p{margin:8px 0}
+.linkbtn{background:none;border:0;padding:0;margin-left:8px;color:var(--teal);font:inherit;text-decoration:underline;cursor:pointer}
+/* Tap-to-define glossary terms */
+.term{text-decoration:underline dotted var(--teal) 2px;text-underline-offset:3px;cursor:help}
+.term:hover{color:var(--teal)}
+.gloss{position:absolute;z-index:20;background:var(--bg);color:var(--ink);border:1px solid var(--gray);border-top:4px solid var(--teal);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:15px;line-height:1.5}
+.gloss p{margin:6px 0}

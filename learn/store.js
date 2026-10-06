@@ -21,19 +21,21 @@ const Store = (() => {
     auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true },
   });
   let user = null, admin = false;
-  let cache = { lessons: {}, quizzes: {} };
+  let cache = { lessons: {}, quizzes: {}, checks: {} }, glossary = null;
 
   async function load() {
     const { data } = await sb.auth.getSession();
     user = data.session ? data.session.user : null;
-    cache = { lessons: {}, quizzes: {} }; admin = false;
+    cache = { lessons: {}, quizzes: {}, checks: {} }; admin = false;
     if (!user) return;
-    const [les, qz, me] = await Promise.all([
+    const [les, qz, me, ck] = await Promise.all([
       sb.from("lesson_progress").select("lesson_file, read_at").eq("user_id", user.id),
       sb.from("quiz_attempts").select("module, score, total").eq("user_id", user.id),
       sb.from("profiles").select("is_admin").eq("id", user.id).maybeSingle(),
+      sb.from("check_answers").select("qid, pick, correct, first_correct, tries").eq("user_id", user.id),
     ]);
     admin = !!(me.data && me.data.is_admin);
+    (ck.data || []).forEach((r) => { cache.checks[r.qid] = r; }); // empty until supabase/04_checks.sql has been run
     (les.data || []).forEach((r) => { cache.lessons[r.lesson_file] = r.read_at; });
     (qz.data || []).forEach((r) => {
       const q = cache.quizzes[r.module] || { best: 0, attempts: 0 };
@@ -62,7 +64,7 @@ const Store = (() => {
     signIn: (email, password) => sb.auth.signInWithPassword({ email, password }),
     sendReset: (email) => sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + "/learn/" }),
     setPassword: (password) => sb.auth.updateUser({ password }),
-    async signOut() { await sb.auth.signOut(); user = null; admin = false; cache = { lessons: {}, quizzes: {} }; },
+    async signOut() { await sb.auth.signOut(); user = null; admin = false; cache = { lessons: {}, quizzes: {}, checks: {} }; },
     onChange(cb) { sb.auth.onAuthStateChange((event) => cb(event)); },
 
     // Course content (signed-in only)
@@ -70,6 +72,10 @@ const Store = (() => {
       const { data, error } = await sb.from("course_data").select("data").eq("key", key).maybeSingle();
       if (error) throw error;
       return data ? data.data : null;
+    },
+    async glossary() {
+      if (!glossary) { try { glossary = (await this.courseData("glossary")) || []; } catch (e) { glossary = []; } }
+      return glossary;
     },
     async lessonHtml(file) {
       const { data, error } = await sb.from("lessons").select("html").eq("file", file).maybeSingle();
@@ -81,7 +87,8 @@ const Store = (() => {
     async publish(bundle, progress) {
       const now = new Date().toISOString();
       const data = [{ key: "course", data: bundle.course, updated_at: now }, { key: "built", data: { built: bundle.built }, updated_at: now }]
-        .concat(Object.entries(bundle.quizzes || {}).map(([key, d]) => ({ key, data: d, updated_at: now })));
+        .concat(Object.entries(bundle.quizzes || {}).map(([key, d]) => ({ key, data: d, updated_at: now })))
+        .concat(bundle.glossary ? [{ key: "glossary", data: bundle.glossary, updated_at: now }] : []);
       let r = await sb.from("course_data").upsert(data);
       if (r.error) throw r.error;
       const rows = bundle.lessons.map((l) => ({ file: l.file, title: l.title, html: l.html, updated_at: now }));
@@ -90,17 +97,19 @@ const Store = (() => {
         if (r.error) throw r.error;
         if (progress) progress(Math.min(i + 15, rows.length), rows.length);
       }
-      return { lessons: rows.length, quizzes: Object.keys(bundle.quizzes || {}).length };
+      glossary = null;
+    return { lessons: rows.length, quizzes: Object.keys(bundle.quizzes || {}).length };
     },
 
     // Admin only: every learner's rows (others only ever get their own).
     async adminData() {
-      const [profiles, lessons, quizzes] = await Promise.all([
+      const [profiles, lessons, quizzes, checks] = await Promise.all([
         all("profiles", "id, full_name, email, created_at, is_admin"),
         all("lesson_progress", "user_id, module, read_at"),
         all("quiz_attempts", "user_id, module, score, total, taken_at"),
+        all("check_answers", "user_id, module, qid, correct, first_correct").catch(() => []),
       ]);
-      return { profiles, lessons, quizzes };
+      return { profiles, lessons, quizzes, checks };
     },
 
     // Progress
@@ -108,6 +117,15 @@ const Store = (() => {
       if (!user || cache.lessons[file]) return;
       cache.lessons[file] = new Date().toISOString();
       await sb.from("lesson_progress").upsert({ user_id: user.id, module: mod, lesson_file: file });
+    },
+    // In-lesson questions: keep the latest pick, and whether the first try was right.
+    async saveCheck(mod, qid, pick, correct) {
+      const old = cache.checks[qid];
+      const row = { qid, pick, correct, first_correct: old ? old.first_correct : correct, tries: old ? old.tries + 1 : 1 };
+      cache.checks[qid] = row;
+      if (!user) return;
+      const { error } = await sb.from("check_answers").upsert({ user_id: user.id, module: mod, ...row, answered_at: new Date().toISOString() });
+      if (error) console.error("answer save failed", error);
     },
     async recordQuiz(mod, score, total) {
       const q = cache.quizzes[mod] || { best: 0, attempts: 0 };

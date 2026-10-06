@@ -58,13 +58,24 @@ function dashboard() {
   focusMain("My course");
 }
 
+// In-lesson question counts for a list of question ids: answered, and right on the first try.
+function checkStats(ids, p) {
+  const a = ids.map((q) => (p.checks || {})[q]).filter(Boolean);
+  return { total: ids.length, answered: a.length, first: a.filter((r) => r.first_correct).length };
+}
+
 function moduleView(n) {
   const m = byN(n), p = Store.get();
   if (!m || !unlocked(n, p)) return dashboard();
   const q = (p.quizzes || {})[n];
+  const all = checkStats(m.lessons.flatMap((l) => l.checks || []), p);
   main.innerHTML = `<p><a href="#/">← My course</a></p><h1>Module ${n}: ${esc(m.title)}</h1>
-    <h2>Lessons</h2><ol class="lessons">${m.lessons.map((l, i) =>
-      `<li><a href="#/m/${n}/l/${i}">${esc(l.title)}</a> ${(p.lessons || {})[l.file] ? "✓" : ""}</li>`).join("")}</ol>
+    <h2>Lessons</h2>
+    ${all.total ? `<p class="muted">Practice questions in the lessons: ${all.answered} of ${all.total} answered, ${all.first} right on the first try.</p>` : ""}
+    <ol class="lessons">${m.lessons.map((l, i) => {
+      const c = checkStats(l.checks || [], p);
+      return `<li><a href="#/m/${n}/l/${i}">${esc(l.title)}</a> ${(p.lessons || {})[l.file] ? "✓" : ""}${c.total ? ` <span class="muted">· ${c.answered}/${c.total} questions</span>` : ""}</li>`;
+    }).join("")}</ol>
     <h2>Module quiz</h2>
     ${m.quiz ? `<p>${QUIZ_SIZE} questions in the style of the final exam, drawn at random, so each try is different. Pass mark 80%. Unlimited tries, with an explanation after every question.</p>
     <p>${q ? `Best score: <b>${Math.round(q.best * 100)}%</b> (${q.attempts} ${q.attempts === 1 ? "try" : "tries"})` : "Not taken yet."}</p>
@@ -84,11 +95,69 @@ async function lessonView(n, i) {
   const next = i < m.lessons.length - 1 ? `<a class="btn" href="#/m/${n}/l/${i + 1}">Next →</a>`
     : m.quiz ? `<a class="btn" href="#/m/${n}/quiz">Take the module quiz →</a>` : `<a class="btn" href="#/m/${n}">Back to the module →</a>`;
   main.innerHTML = `<p><a href="#/m/${n}">← Module ${n}: ${esc(m.title)}</a></p><div id="reader"></div><article class="lesson">${html}</article><div class="pager">${prev}${next}</div>`;
-  Reader.attach(main.querySelector("article.lesson"), $("#reader"));
+  const art = main.querySelector("article.lesson");
+  setupChecks(art, n);
+  Reader.attach(art, $("#reader"));
   main.querySelectorAll("img").forEach((img) => { img.loading = "lazy"; });
   Store.markLesson(n, l.file);
   focusMain(l.title);
 }
+
+// ---------- In-lesson exam-style questions ----------
+// Each question is graded the moment the learner picks an answer, with the full explanation.
+// Answers are saved, so a returning learner sees what they chose; "Try again" clears the question.
+function setupChecks(art, n) {
+  art.querySelectorAll(".mcq").forEach((box) => {
+    const qid = box.dataset.q, key = box.dataset.key;
+    const opts = [...box.querySelectorAll(".opt")], fb = box.querySelector(".mcq-fb"), verdict = box.querySelector(".mcq-verdict");
+    const show = (pick, saved) => {
+      const right = pick === key;
+      opts.forEach((o) => { o.disabled = true; o.classList.toggle("right", o.dataset.l === key); o.classList.toggle("wrong", o.dataset.l === pick && !right); });
+      verdict.innerHTML = `<b class="${right ? "ok" : "no"}">${right ? "Correct." : `Not quite. The best answer is ${key}.`}</b>` +
+        (saved ? ` <span class="muted">(your saved answer: ${pick})</span>` : "") +
+        ` <button type="button" class="linkbtn" data-act="again">Try again</button>`;
+      fb.hidden = false;
+      verdict.querySelector("[data-act=again]").addEventListener("click", reset);
+    };
+    const reset = () => {
+      opts.forEach((o) => { o.disabled = false; o.classList.remove("right", "wrong"); });
+      fb.hidden = true; opts[0].focus();
+    };
+    opts.forEach((o) => o.addEventListener("click", () => {
+      show(o.dataset.l, false);
+      Store.saveCheck(n, qid, o.dataset.l, o.dataset.l === key);
+    }));
+    const prior = (Store.get().checks || {})[qid];
+    if (prior) show(prior.pick, true);
+  });
+}
+
+// ---------- Tap-to-define glossary ----------
+const tip = document.createElement("div");
+tip.className = "gloss"; tip.setAttribute("role", "dialog"); tip.hidden = true;
+document.body.appendChild(tip);
+const closeTip = () => { tip.hidden = true; };
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest(".term");
+  if (!t) { if (!e.target.closest(".gloss")) closeTip(); return; }
+  const g = await Store.glossary();
+  const items = t.dataset.g.split(",").map((i) => g[+i]).filter(Boolean);
+  if (!items.length) return;
+  tip.setAttribute("aria-label", "Definition of " + t.textContent);
+  tip.innerHTML = items.map((it) => `<p><b>${esc(it.t)}</b>: ${it.d}${it.m != null ? ` <span class="muted">(Module ${it.m})</span>` : ""}</p>`).join("") +
+    `<button type="button" class="linkbtn" data-act="close">Close</button>`;
+  tip.querySelector("[data-act=close]").addEventListener("click", closeTip);
+  tip.hidden = false;
+  const r = t.getBoundingClientRect(), w = Math.min(420, window.innerWidth - 24);
+  tip.style.width = w + "px";
+  tip.style.left = Math.max(12, Math.min(r.left + window.scrollX, window.scrollX + window.innerWidth - w - 12)) + "px";
+  tip.style.top = r.bottom + window.scrollY + 8 + "px";
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTip();
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest && e.target.closest(".term")) { e.preventDefault(); e.target.click(); }
+});
+window.addEventListener("hashchange", closeTip);
 
 async function quizView(n) {
   const m = byN(n);
@@ -163,7 +232,7 @@ async function adminView() {
     $("#pub").disabled = true;
     try {
       const r = await Store.publish(bundle, (done, total) => { msg.textContent = `Uploading lessons… ${done} of ${total}`; });
-      msg.textContent = `Published ${r.lessons} lessons and ${r.quizzes} quizzes.`;
+      msg.textContent = `Published ${r.lessons} lessons, ${r.quizzes} quizzes${bundle.glossary ? `, and ${bundle.glossary.length} glossary terms` : ""}.`;
       COURSE = (await Store.courseData("course")) || [];
     } catch (e) {
       msg.textContent = "Publishing failed: " + (e.message || e) + (/permission|policy|denied/i.test(e.message || "") ? " (Has supabase/03_content.sql been run, and is your account an admin?)" : "");
@@ -193,7 +262,9 @@ async function learnersTable() {
     const doneN = mods.filter((m) => m.done).length;
     const current = (mods.find((m) => !m.done) || {}).n;
     const last = [...les.map((r) => r.read_at), ...qz.map((r) => r.taken_at)].sort().pop();
-    return { p, mods, doneN, read: les.length, current, last };
+    const ck = (d.checks || []).filter((r) => r.user_id === p.id);
+    mods.forEach((m) => { const c = ck.filter((r) => r.module === m.n); m.ck = c.length; m.ckFirst = c.filter((r) => r.first_correct).length; });
+    return { p, mods, doneN, read: les.length, current, last, ck: ck.length, ckFirst: ck.filter((r) => r.first_correct).length };
   }).sort((a, b) => (b.last || "").localeCompare(a.last || ""));
   const learners = rows.filter((r) => !r.p.is_admin);
   const active = learners.filter((r) => r.last && Date.now() - new Date(r.last) < 7 * 864e5).length;
@@ -201,9 +272,9 @@ async function learnersTable() {
     const show = rows.filter((r) => !q || `${r.p.full_name || ""} ${r.p.email || ""}`.toLowerCase().includes(q));
     $("#lr").innerHTML = show.map((r) => `<li class="q" style="margin:10px 0">
       <details><summary style="cursor:pointer"><b>${esc(r.p.full_name || "(no name)")}</b> · ${esc(r.p.email || "")}${r.p.is_admin ? ` <span class="tag">admin</span>` : ""}<br>
-        <span class="muted">Joined ${day(r.p.created_at)} · Last active ${day(r.last)} · Lessons read ${r.read}/${nLessons} · Modules complete ${r.doneN}/${total}${r.doneN < total && r.current !== undefined ? ` · Working on Module ${r.current}` : r.doneN === total && total ? " · All modules complete" : ""}</span></summary>
-        <table><thead><tr><th>Module</th><th>Lessons read</th><th>Best quiz</th><th>Tries</th></tr></thead><tbody>${r.mods.map((m) =>
-          `<tr><td>${m.n}</td><td>${m.read}/${m.of}</td><td>${m.best === null ? "—" : `${Math.round(m.best * 100)}%${m.best >= PASS ? " ✓" : ""}`}</td><td>${m.tries}</td></tr>`).join("")}</tbody></table>
+        <span class="muted">Joined ${day(r.p.created_at)} · Last active ${day(r.last)} · Lessons read ${r.read}/${nLessons} · Modules complete ${r.doneN}/${total} · Lesson questions answered ${r.ck} (${r.ck ? Math.round((r.ckFirst / r.ck) * 100) : 0}% right first try)${r.doneN < total && r.current !== undefined ? ` · Working on Module ${r.current}` : r.doneN === total && total ? " · All modules complete" : ""}</span></summary>
+        <table><thead><tr><th>Module</th><th>Lessons read</th><th>Lesson questions (right first try)</th><th>Best quiz</th><th>Tries</th></tr></thead><tbody>${r.mods.map((m) =>
+          `<tr><td>${m.n}</td><td>${m.read}/${m.of}</td><td>${m.ck ? `${m.ck} (${m.ckFirst})` : "—"}</td><td>${m.best === null ? "—" : `${Math.round(m.best * 100)}%${m.best >= PASS ? " ✓" : ""}`}</td><td>${m.tries}</td></tr>`).join("")}</tbody></table>
       </details></li>`).join("") || `<li class="muted">No matches.</li>`;
   };
   box.innerHTML = `<p class="muted">${learners.length} ${learners.length === 1 ? "learner" : "learners"} · ${active} active in the last 7 days · ${learners.filter((r) => r.doneN === total && total).length} finished every module</p>
@@ -215,8 +286,8 @@ async function learnersTable() {
   $("#lf").addEventListener("input", (e) => draw(e.target.value.trim().toLowerCase()));
   $("#csv").addEventListener("click", () => {
     const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const head = ["Name", "Email", "Joined", "Last active", "Lessons read", "Modules complete", ...COURSE.map((m) => `M${m.n} best %`)];
-    const lines = learners.map((r) => [r.p.full_name, r.p.email, day(r.p.created_at), day(r.last), r.read, r.doneN,
+    const head = ["Name", "Email", "Joined", "Last active", "Lessons read", "Modules complete", "Lesson questions answered", "Right first try", ...COURSE.map((m) => `M${m.n} best %`)];
+    const lines = learners.map((r) => [r.p.full_name, r.p.email, day(r.p.created_at), day(r.last), r.read, r.doneN, r.ck, r.ckFirst,
       ...r.mods.map((m) => (m.best === null ? "" : Math.round(m.best * 100)))].map(cell).join(","));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([[head.map(cell).join(","), ...lines].join("\n")], { type: "text/csv" }));
