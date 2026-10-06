@@ -6,13 +6,13 @@ const Reader = (() => {
   const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem("ehrico-reader-" + k); localStorage.setItem("ehrico-reader-" + k, v); } catch (e) { return null; } };
   let queue = [], idx = 0, playing = false, paused = false, rate = Number(pref("rate")) || 1, voiceName = pref("voice") || "", bar = null;
 
-  const englishVoices = () => (synth ? synth.getVoices() : []).filter((v) => /^en(-|_|$)/i.test(v.lang));
+  // Hide novelty voices and put the most natural ones first.
+  const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Fred|Good News|Hysterical|Jester|Junior|Kathy|Organ|Pipe Organ|Princess|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox|Grandma|Grandpa|Eddy|Flo|Reed|Rocko|Sandy|Shelley)\b/i;
+  const score = (v) => (/premium|neural|natural|online/i.test(v.name) ? 0 : /enhanced|siri/i.test(v.name) ? 1 : /^(Samantha|Ava|Allison|Susan|Zoe|Evan|Nathan|Tom|Google US English|Google UK English|Microsoft)/i.test(v.name) ? 2 : 3) + (/en-US/i.test(v.lang) ? 0 : 0.5);
+  const englishVoices = () => (synth ? synth.getVoices() : []).filter((v) => /^en(-|_|$)/i.test(v.lang) && !NOVELTY.test(v.name)).sort((a, b) => score(a) - score(b));
   function bestVoice() {
     const vs = englishVoices();
-    return vs.find((v) => v.name === voiceName)
-      || vs.find((v) => /premium|enhanced|natural|neural/i.test(v.name) && /en-US/i.test(v.lang))
-      || vs.find((v) => /^(Samantha|Ava|Allison|Google US English|Microsoft (Aria|Jenny))/i.test(v.name))
-      || vs.find((v) => /en-US/i.test(v.lang)) || vs[0] || null;
+    return vs.find((v) => v.name === voiceName) || vs[0] || null;
   }
   const textOf = (el) => el.innerText.replace(/\s+/g, " ").trim();
 
