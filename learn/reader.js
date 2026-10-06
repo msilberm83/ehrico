@@ -9,7 +9,11 @@ const Reader = (() => {
   // Hide novelty voices and put the most natural ones first.
   const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Deranged|Fred|Good News|Hysterical|Jester|Junior|Kathy|Organ|Pipe Organ|Princess|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox|Grandma|Grandpa|Eddy|Flo|Reed|Rocko|Sandy|Shelley)\b/i;
   const score = (v) => (/premium|neural|natural|online/i.test(v.name) ? 0 : /enhanced|siri/i.test(v.name) ? 1 : /^(Samantha|Ava|Allison|Susan|Zoe|Evan|Nathan|Tom|Google US English|Google UK English|Microsoft)/i.test(v.name) ? 2 : 3) + (/en-US/i.test(v.lang) ? 0 : 0.5);
-  const englishVoices = () => (synth ? synth.getVoices() : []).filter((v) => /^en(-|_|$)/i.test(v.lang) && !NOVELTY.test(v.name)).sort((a, b) => score(a) - score(b));
+  const englishVoices = () => {
+    const all = (synth ? synth.getVoices() : []).filter((v) => /^en(-|_|$)/i.test(v.lang) && !NOVELTY.test(v.name));
+    const us = all.filter((v) => /en[-_]US/i.test(v.lang)); // American English voices only, when the device has them
+    return (us.length ? us : all).sort((a, b) => score(a) - score(b));
+  };
   function bestVoice() {
     const vs = englishVoices();
     return vs.find((v) => v.name === voiceName) || vs[0] || null;
