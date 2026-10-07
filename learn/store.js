@@ -20,7 +20,7 @@ const Store = (() => {
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true },
   });
-  let user = null, admin = false;
+  let user = null, admin = false, track = null;
   let cache = { lessons: {}, quizzes: {}, checks: {}, mocks: {} }, glossary = null;
 
   async function load() {
@@ -31,12 +31,13 @@ const Store = (() => {
     const [les, qz, me, ck, mk] = await Promise.all([
       sb.from("lesson_progress").select("lesson_file, read_at").eq("user_id", user.id),
       sb.from("quiz_attempts").select("module, score, total").eq("user_id", user.id),
-      sb.from("profiles").select("is_admin").eq("id", user.id).maybeSingle(),
+      sb.from("profiles").select("*").eq("id", user.id).maybeSingle(),
       sb.from("check_answers").select("qid, pick, correct, first_correct, tries").eq("user_id", user.id),
       sb.from("mock_attempts").select("exam, score, total, taken_at").eq("user_id", user.id),
     ]);
     (mk.data || []).forEach((r) => { const m = cache.mocks[r.exam] || { best: 0, attempts: 0 }; cache.mocks[r.exam] = { best: Math.max(m.best, r.score / r.total), attempts: m.attempts + 1 }; });
     admin = !!(me.data && me.data.is_admin);
+    track = (me.data && me.data.track) || null; // null until supabase/04_checks.sql adds the column and the learner chooses
     (ck.data || []).forEach((r) => { cache.checks[r.qid] = r; }); // empty until supabase/04_checks.sql has been run
     (les.data || []).forEach((r) => { cache.lessons[r.lesson_file] = r.read_at; });
     (qz.data || []).forEach((r) => {
@@ -60,6 +61,13 @@ const Store = (() => {
     link: LINK,
     user: () => user,
     isAdmin: () => admin,
+    track: () => track,
+    async setTrack(t) {
+      track = t;
+      if (!user) return;
+      const { error } = await sb.from("profiles").update({ track: t }).eq("id", user.id);
+      if (error) console.error("track save failed", error);
+    },
     get: () => cache,
 
     // Sign-in

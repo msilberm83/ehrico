@@ -46,6 +46,7 @@ function dashboard() {
   const done = COURSE.filter((m) => complete(m, p)).length, total = COURSE.length;
   main.innerHTML = `<h1>My course</h1>
     <p class="muted">EHRICO · Electronic Health Records Implementation and Clinic Operations · ${done} of ${total} modules complete</p>
+    ${trackCard()}
     <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}" aria-label="Modules complete"><i style="width:${total ? (done / total) * 100 : 0}%"></i></div>
     <ol class="mods" start="0">${COURSE.map((m) => {
       const prev = prevOf(m.n);
@@ -59,6 +60,37 @@ function dashboard() {
   focusMain("My course");
 }
 
+// ---------- Exam track ----------
+// Every learner takes the EHRICO course; the track says which national exam they are also preparing for.
+// Questions written in the style of the other exam stay available but are marked optional.
+const TRACKS = {
+  CEHRS: { name: "CEHRS", what: "NHA's Certified Electronic Health Records Specialist: the clinic's daily EHR work. Most students choose this one." },
+  CAHIMS: { name: "CAHIMS", what: "HIMSS's Certified Associate in Healthcare Information and Management Systems: health IT, projects, and management." },
+  BOTH: { name: "Both", what: "Prepare for CEHRS and CAHIMS." },
+  UNDECIDED: { name: "Not sure yet", what: "Show everything; choose later." },
+};
+function trackCard() {
+  const t = Store.track();
+  if (t && !trackCard.edit) return `<p class="muted">Exam track: <b>${TRACKS[t] ? TRACKS[t].name : esc(t)}</b> · <a href="#/track">Change</a></p>`;
+  return `<section class="q"><h2 style="margin-top:0">Which national exam are you preparing for?</h2>
+    <p>The EHRICO course prepares you for its own certificate and for one or both national exams. Your choice puts that exam's practice first; nothing is locked, and you can change it anytime.</p>
+    <div role="group" aria-label="Exam track">${Object.entries(TRACKS).map(([k, v]) =>
+      `<button class="opt" data-track="${k}"><b>${v.name}.</b> ${v.what}</button>`).join("")}</div></section>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-track]");
+  if (!b) return;
+  await Store.setTrack(b.dataset.track);
+  trackCard.edit = false;
+  location.hash = "#/"; dashboard();
+});
+// A question is optional for the learner when it is written only in the style of the exam they are not taking.
+function optionalFor(label) {
+  const t = Store.track();
+  if (!t || t === "BOTH" || t === "UNDECIDED" || /EHRICO/.test(label)) return false;
+  return !label.includes(t);
+}
+
 // Resources (roster, exam prep guide, glossary) and the mock exams, shown under the module list.
 const mocksOpen = (p) => Store.isAdmin() || (COURSE.length && complete(COURSE[COURSE.length - 1], p));
 function resourcesBox(p) {
@@ -67,10 +99,11 @@ function resourcesBox(p) {
   return `<h2>Resources</h2><ul class="lessons">${RES.lessons.map((r, i) => `<li><a href="#/r/${i}">${esc(r.title)}</a></li>`).join("")}</ul>
     ${RES.mocks.length ? `<h2>Mock exams</h2>
     <p class="muted">Full-length practice for the partner exams, written to their test plans. ${mocksOpen(p) ? "" : `They open when you finish Module ${last ? last.n : 13}.`}</p>
-    <ol class="mods">${RES.mocks.map((m) => {
+    <ol class="mods">${[...RES.mocks].sort((a, b) => optionalFor(a.exam) - optionalFor(b.exam)).map((m) => {
       const b = (p.mocks || {})[m.exam];
       const st = b ? `<span class="tag${b.best >= 0.75 ? " done" : ""}">Best ${Math.round(b.best * 100)}%</span>` : `<span class="tag">${m.count} questions · ${m.minutes} min</span>`;
-      return `<li class="mod">${mocksOpen(p) ? `<a href="#/mock/${m.exam}">${esc(m.title)}</a>` : `<span>${esc(m.title)}</span>`}${st}</li>`;
+      const opt = optionalFor(m.exam) ? ` <span class="tag">Optional for your track</span>` : "";
+      return `<li class="mod">${mocksOpen(p) ? `<a href="#/mock/${m.exam}">${esc(m.title)}</a>` : `<span>${esc(m.title)}</span>`}${opt}${st}</li>`;
     }).join("")}</ol>` : ""}`;
 }
 
@@ -254,6 +287,8 @@ function finishMock(M, st) {
 function setupChecks(art, n) {
   art.querySelectorAll(".mcq").forEach((box) => {
     const qid = box.dataset.q, key = box.dataset.key;
+    const exam = box.querySelector(".mcq-exam");
+    if (exam && optionalFor(exam.textContent)) { box.classList.add("optional"); exam.textContent += " · optional for your track"; }
     const opts = [...box.querySelectorAll(".opt")], fb = box.querySelector(".mcq-fb"), verdict = box.querySelector(".mcq-verdict");
     const show = (pick, saved) => {
       const right = pick === key;
@@ -526,6 +561,7 @@ async function route() {
   if (needPassword || h[0] === "set-password") return setPasswordView();
   if (h[0] === "admin") return adminView();
   if (!COURSE.length) return emptyView();
+  if (h[0] === "track") { trackCard.edit = true; return dashboard(); }
   if (h[0] === "r") return resourceView(+h[1]);
   if (h[0] === "mock") return mockView(h[1]);
   clearInterval(mockTimer);

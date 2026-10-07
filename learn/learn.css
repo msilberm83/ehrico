@@ -79,3 +79,4 @@ figure{margin:16px 0}figcaption{font-size:14px;color:var(--muted)}
 table.score{border-collapse:collapse;width:100%;max-width:640px}table.score th,table.score td{border:1px solid var(--gray);padding:6px 10px;text-align:left}
 .ok{color:var(--good);font-weight:700}.no{color:var(--bad);font-weight:700}
 .kitfiles ul{columns:2;column-gap:24px}@media (max-width:640px){.kitfiles ul{columns:1}}
+.mcq.optional{border-left-color:var(--gray);opacity:.92}
