@@ -408,6 +408,11 @@ if __name__ == "__main__":
     guide = os.path.join(CE, "97_exam_prep_guide_v2.md")
     if os.path.exists(guide):
         res.append(resource("R/exam_prep", "Exam prep guide", open(guide, encoding="utf-8").read().split("\n", 1)[1]))
+    for f, t in (("CAP_01_candidate_packet.md", "Capstone candidate packet"), ("CAP_02_northline_casebook.md", "Northline Care Group casebook"),
+                 ("CAP_03_candidate_rubric.md", "Capstone rubric")):
+        p = os.path.join(CE, "capstone", f)
+        if os.path.exists(p):
+            res.append(resource("R/" + f[:-3].lower(), t, open(p, encoding="utf-8").read().split("\n", 1)[1]))
     res.append(resource("R/glossary", "Glossary", open(os.path.join(CE, "98_glossary_v2.md"), encoding="utf-8").read().split("\n", 1)[1]))
     mocks = {}
     for exam, minutes in (("CEHRS", 100), ("CAHIMS", 120)):
