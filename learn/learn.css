@@ -67,3 +67,15 @@ figure{margin:16px 0}figcaption{font-size:14px;color:var(--muted)}
 .term:hover{color:var(--teal)}
 .gloss{position:absolute;z-index:20;background:var(--bg);color:var(--ink);border:1px solid var(--gray);border-top:4px solid var(--teal);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:15px;line-height:1.5}
 .gloss p{margin:6px 0}
+
+/* Mock exams */
+.mockbar{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--gray);border-radius:12px;padding:10px 14px}
+.opt.picked{border-color:var(--navy);background:color-mix(in srgb,var(--teal) 10%,var(--bg))}
+@media (prefers-color-scheme:dark){.opt.picked{border-color:#9ec5e8}}
+.qmap{margin-top:16px}.qmap summary{cursor:pointer;font-weight:600}
+.qmap div{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.qn{width:40px;height:36px;border-radius:8px;border:2px solid var(--gray);background:var(--bg);color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+.qn.done{background:var(--gray)}.qn.flag{border-color:var(--orange)}.qn.cur{outline:3px solid var(--teal)}
+table.score{border-collapse:collapse;width:100%;max-width:640px}table.score th,table.score td{border:1px solid var(--gray);padding:6px 10px;text-align:left}
+.ok{color:var(--good);font-weight:700}.no{color:var(--bad);font-weight:700}
+.kitfiles ul{columns:2;column-gap:24px}@media (max-width:640px){.kitfiles ul{columns:1}}

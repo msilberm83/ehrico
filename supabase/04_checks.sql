@@ -1,4 +1,4 @@
--- EHRICO Learning Center — saved answers to the questions inside lessons (run once: Supabase → SQL Editor → New query → paste all → Run)
+-- EHRICO Learning Center — saved answers to the questions inside lessons, and mock exam attempts (run once: Supabase → SQL Editor → New query → paste all → Run)
 -- Each learner can read and save only their own answers; admins can read everyone's for the Learners page.
 
 create table if not exists public.check_answers (
@@ -23,5 +23,23 @@ create policy "own check answers update" on public.check_answers for update to a
 revoke all on public.check_answers from anon;
 grant select, insert, update on public.check_answers to authenticated;
 
--- Shows the new table is ready (the result appears below after you click Run)
-select count(*) as saved_answers from public.check_answers;
+-- Mock exam attempts (one row per finished attempt, with the score in each domain)
+create table if not exists public.mock_attempts (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  exam text not null check (exam in ('CEHRS', 'CAHIMS')),
+  score int not null,
+  total int not null,
+  by_domain jsonb,
+  taken_at timestamptz not null default now()
+);
+alter table public.mock_attempts enable row level security;
+drop policy if exists "own mock attempts read" on public.mock_attempts;
+create policy "own mock attempts read" on public.mock_attempts for select to authenticated using (user_id = auth.uid() or public.is_admin());
+drop policy if exists "own mock attempts insert" on public.mock_attempts;
+create policy "own mock attempts insert" on public.mock_attempts for insert to authenticated with check (user_id = auth.uid());
+revoke all on public.mock_attempts from anon;
+grant select, insert on public.mock_attempts to authenticated;
+
+-- Shows both new tables are ready (the result appears below after you click Run)
+select (select count(*) from public.check_answers) as saved_answers, (select count(*) from public.mock_attempts) as mock_attempts;

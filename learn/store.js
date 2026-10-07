@@ -21,19 +21,21 @@ const Store = (() => {
     auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true },
   });
   let user = null, admin = false;
-  let cache = { lessons: {}, quizzes: {}, checks: {} }, glossary = null;
+  let cache = { lessons: {}, quizzes: {}, checks: {}, mocks: {} }, glossary = null;
 
   async function load() {
     const { data } = await sb.auth.getSession();
     user = data.session ? data.session.user : null;
-    cache = { lessons: {}, quizzes: {}, checks: {} }; admin = false;
+    cache = { lessons: {}, quizzes: {}, checks: {}, mocks: {} }; admin = false;
     if (!user) return;
-    const [les, qz, me, ck] = await Promise.all([
+    const [les, qz, me, ck, mk] = await Promise.all([
       sb.from("lesson_progress").select("lesson_file, read_at").eq("user_id", user.id),
       sb.from("quiz_attempts").select("module, score, total").eq("user_id", user.id),
       sb.from("profiles").select("is_admin").eq("id", user.id).maybeSingle(),
       sb.from("check_answers").select("qid, pick, correct, first_correct, tries").eq("user_id", user.id),
+      sb.from("mock_attempts").select("exam, score, total, taken_at").eq("user_id", user.id),
     ]);
+    (mk.data || []).forEach((r) => { const m = cache.mocks[r.exam] || { best: 0, attempts: 0 }; cache.mocks[r.exam] = { best: Math.max(m.best, r.score / r.total), attempts: m.attempts + 1 }; });
     admin = !!(me.data && me.data.is_admin);
     (ck.data || []).forEach((r) => { cache.checks[r.qid] = r; }); // empty until supabase/04_checks.sql has been run
     (les.data || []).forEach((r) => { cache.lessons[r.lesson_file] = r.read_at; });
@@ -64,7 +66,7 @@ const Store = (() => {
     signIn: (email, password) => sb.auth.signInWithPassword({ email, password }),
     sendReset: (email) => sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + "/learn/" }),
     setPassword: (password) => sb.auth.updateUser({ password }),
-    async signOut() { await sb.auth.signOut(); user = null; admin = false; cache = { lessons: {}, quizzes: {}, checks: {} }; },
+    async signOut() { await sb.auth.signOut(); user = null; admin = false; cache = { lessons: {}, quizzes: {}, checks: {}, mocks: {} }; },
     onChange(cb) { sb.auth.onAuthStateChange((event) => cb(event)); },
 
     // Course content (signed-in only)
@@ -91,6 +93,11 @@ const Store = (() => {
         .concat(bundle.glossary ? [{ key: "glossary", data: bundle.glossary, updated_at: now }] : []);
       let r = await sb.from("course_data").upsert(data);
       if (r.error) throw r.error;
+      // Large extras (lab kit downloads, mock exams, resource list) go one row at a time to stay under request limits.
+      for (const [key, d] of Object.entries(bundle.extra || {})) {
+        r = await sb.from("course_data").upsert({ key, data: d, updated_at: now });
+        if (r.error) throw r.error;
+      }
       const rows = bundle.lessons.map((l) => ({ file: l.file, title: l.title, html: l.html, updated_at: now }));
       for (let i = 0; i < rows.length; i += 15) {
         r = await sb.from("lessons").upsert(rows.slice(i, i + 15));
@@ -98,18 +105,19 @@ const Store = (() => {
         if (progress) progress(Math.min(i + 15, rows.length), rows.length);
       }
       glossary = null;
-    return { lessons: rows.length, quizzes: Object.keys(bundle.quizzes || {}).length };
+    return { lessons: rows.length, quizzes: Object.keys(bundle.quizzes || {}).length, mocks: Object.keys(bundle.extra || {}).filter((k) => k.startsWith("mock_")).length };
     },
 
     // Admin only: every learner's rows (others only ever get their own).
     async adminData() {
-      const [profiles, lessons, quizzes, checks] = await Promise.all([
+      const [profiles, lessons, quizzes, checks, mocks] = await Promise.all([
         all("profiles", "id, full_name, email, created_at, is_admin"),
         all("lesson_progress", "user_id, module, read_at"),
         all("quiz_attempts", "user_id, module, score, total, taken_at"),
         all("check_answers", "user_id, module, qid, correct, first_correct").catch(() => []),
+        all("mock_attempts", "user_id, exam, score, total, taken_at").catch(() => []),
       ]);
-      return { profiles, lessons, quizzes, checks };
+      return { profiles, lessons, quizzes, checks, mocks };
     },
 
     // Progress
@@ -126,6 +134,13 @@ const Store = (() => {
       if (!user) return;
       const { error } = await sb.from("check_answers").upsert({ user_id: user.id, module: mod, ...row, answered_at: new Date().toISOString() });
       if (error) console.error("answer save failed", error);
+    },
+    async recordMock(exam, score, total, byDomain) {
+      const m = cache.mocks[exam] || { best: 0, attempts: 0 };
+      cache.mocks[exam] = { best: Math.max(m.best, score / total), attempts: m.attempts + 1 };
+      if (!user) return;
+      const { error } = await sb.from("mock_attempts").insert({ user_id: user.id, exam, score, total, by_domain: byDomain });
+      if (error) console.error("mock exam save failed", error);
     },
     async recordQuiz(mod, score, total) {
       const q = cache.quizzes[mod] || { best: 0, attempts: 0 };

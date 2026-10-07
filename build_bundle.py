@@ -302,6 +302,9 @@ def build_module(n):
     for k, g in enumerate(groups, 1):
         first = g[0].split("\n", 1)[0].lstrip("# ").strip()
         add(f"L{k:02d}", f"Module {n}, Lesson {k}: {first}", "\n\n".join(g))
+    kit = os.path.join(KIT, f"M{n:02d}_lab_kit.md")
+    if os.path.exists(kit):
+        add("L97_lab_kit", f"Module {n} — Lab kit", open(kit, encoding="utf-8").read().split("\n", 1)[1])
     if re.sub(r"^#.*$", "", answers, flags=re.M).strip():
         add("L98_answers", f"Module {n} — Answers", "## Answers for this module" + answers)
     if sources:
@@ -311,6 +314,69 @@ def build_module(n):
     for qid in sorted(set(keys) - used):
         print(f"  warning: M{n} answer {qid} has no matching question")
     return {"n": n, "title": title, "lessons": lessons, "quiz": quiz}
+
+
+# ---------- Lab kit downloads, resources, and mock exams ----------
+KIT = os.path.join(CE, "lab_kit")
+
+
+def kit_files(n):
+    """Spreadsheet (CSV) and image files for one module's lab kit, as {name: {type, data}} (images base64)."""
+    import base64
+    out = {}
+    for p in sorted(glob.glob(os.path.join(KIT, "csv", f"M{n:02d}_*.csv"))):
+        out[os.path.basename(p)] = {"type": "text/csv", "data": open(p, encoding="utf-8").read()}
+    for p in sorted(glob.glob(os.path.join(KIT, "images", f"M{n:02d}_*.png"))):
+        out[os.path.basename(p)] = {"type": "image/png", "b64": base64.b64encode(open(p, "rb").read()).decode()}
+    return out
+
+
+def resource(file, title, md):
+    return {"file": file, "title": title, "html": f"<h1>{html.escape(title)}</h1>\n" + gloss_mark(pandoc(md))}
+
+
+def parse_mock(path, exam, minutes):
+    """Questions, keys, explanations, and domains from a book mock exam (exams/<EXAM>_Mock_Exam_A.md)."""
+    t = open(path, encoding="utf-8").read()
+    qs = t.split("## Questions", 1)[1].split("## Answer sheet", 1)[0]
+    ans = t.split("## Answers and explanations", 1)[1].split("## Score by domain", 1)[0]
+    dom = t.split("## Score by domain", 1)[1]
+    domain_of, table_order = {}, []
+    for line in re.findall(r"^\|.+\|\s*$", dom, re.M):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        name = cells[0].strip("* ")
+        if not cells or re.match(r"(?i)(domain|total|-+)$", name) or set(name) <= set("-: "):
+            continue
+        lists = [c for c in cells[1:] if re.fullmatch(r"\d+(\s*,\s*\d+)+", c)]  # the cell that lists question numbers
+        if not lists:
+            continue
+        for x in lists[0].split(","):
+            domain_of[int(x)] = name
+        table_order.append(name)
+    items, pieces = [], []
+    for b in re.split(r"\n(?=### Question \d+)", "\n" + qs)[1:]:
+        num = int(re.match(r"### Question (\d+)", b.strip()).group(1))
+        body = b.strip().split("\n", 1)[1]
+        opts = dict(re.findall(r"^([ABCD])\. (.+?)\s*$", body, re.M))
+        stem = re.split(r"\n(?=A\. )", body, 1)[0].strip()
+        items.append({"n": num, "options": opts, "domain": domain_of.get(num, "")})
+        pieces.append(stem)
+    keys = {}
+    for m in re.finditer(r"^\*\*(\d+)\. Key ([ABCD])\.\*\*\s*(.+?)(?=^\*\*\d+\. Key |\Z)", ans, re.S | re.M):
+        keys[int(m.group(1))] = (m.group(2), m.group(3).strip())
+    for it in items:
+        pieces.append(keys.get(it["n"], ("", ""))[1])
+    conv = md_batch(pieces)
+    k = len(items)
+    for i, it in enumerate(items):
+        it["stem"] = conv[i]
+        it["key"] = keys.get(it["n"], ("", ""))[0]
+        it["explain"] = conv[k + i]
+        it["options"] = {L: inline_md(o) for L, o in it["options"].items()}
+        if not it["key"] or len(it["options"]) != 4:
+            print(f"  warning: {exam} mock question {it['n']} is incomplete")
+    domains = [d for d in table_order if any(it["domain"] == d for it in items)]
+    return {"exam": exam, "title": f"{exam} Mock Exam A", "minutes": minutes, "domains": domains, "items": items}
 
 
 def render_images():
@@ -335,12 +401,30 @@ if __name__ == "__main__":
     mods = [build_module(n) for n in range(0, 14)]
     course = [{"n": m["n"], "title": m["title"], "quiz": bool(m["quiz"]),
                "lessons": [{"file": l["file"], "title": l["title"], "checks": l["checks"]} for l in m["lessons"]]} for m in mods]
+    res = []
+    roster = os.path.join(KIT, "00_practice_emr_roster.md")
+    if os.path.exists(roster):
+        res.append(resource("R/roster", "Practice EMR roster", open(roster, encoding="utf-8").read().split("\n", 1)[1]))
+    guide = os.path.join(CE, "97_exam_prep_guide_v2.md")
+    if os.path.exists(guide):
+        res.append(resource("R/exam_prep", "Exam prep guide", open(guide, encoding="utf-8").read().split("\n", 1)[1]))
+    res.append(resource("R/glossary", "Glossary", open(os.path.join(CE, "98_glossary_v2.md"), encoding="utf-8").read().split("\n", 1)[1]))
+    mocks = {}
+    for exam, minutes in (("CEHRS", 100), ("CAHIMS", 120)):
+        p = os.path.join(CE, "exams", f"{exam}_Mock_Exam_A.md")
+        if os.path.exists(p):
+            mocks[f"mock_{exam}"] = parse_mock(p, exam, minutes)
+    extra = {f"kit_M{n:02d}": kit_files(n) for n in range(14)}
+    extra.update(mocks)
+    extra["resources"] = {"lessons": [{"file": r["file"], "title": r["title"]} for r in res],
+                          "mocks": [{"key": k, "exam": v["exam"], "title": v["title"], "count": len(v["items"]), "minutes": v["minutes"]} for k, v in mocks.items()]}
     bundle = {
         "built": datetime.datetime.now().isoformat(timespec="seconds"),
         "course": course,
         "quizzes": {f"quiz_M{m['n']:02d}": m["quiz"] for m in mods if m["quiz"]},
         "glossary": GLOSS,
-        "lessons": [{"file": l["file"], "title": l["title"], "html": l["html"]} for m in mods for l in m["lessons"]],
+        "extra": extra,
+        "lessons": [{"file": l["file"], "title": l["title"], "html": l["html"]} for m in mods for l in m["lessons"]] + res,
     }
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, "ehrico_content_bundle.json")
@@ -348,6 +432,9 @@ if __name__ == "__main__":
     print(f"modules: {len(mods)}  lessons: {len(bundle['lessons'])}  quizzes: {len(bundle['quizzes'])} "
           f"({sum(len(v) for v in bundle['quizzes'].values())} questions)  figures: {len(used_figs)}")
     print(f"in-lesson questions: {sum(len(l['checks']) for m in course for l in m['lessons'])}  glossary terms: {len(GLOSS)}")
+    mock_note = ", ".join(v["exam"] + " " + str(len(v["items"])) for v in mocks.values())
+    print(f"resources: {len(res)}  mock exams: {mock_note}  "
+          f"kit downloads: {sum(len(extra[f'kit_M{n:02d}']) for n in range(14))} files")
     print(f"bundle: {out} ({os.path.getsize(out) // 1024} KB)")
     if "--no-images" not in sys.argv:
         render_images()
