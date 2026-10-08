@@ -23,11 +23,11 @@ create policy "own check answers update" on public.check_answers for update to a
 revoke all on public.check_answers from anon;
 grant select, insert, update on public.check_answers to authenticated;
 
--- Mock exam attempts (one row per finished attempt, with the score in each domain)
+-- Mock exam attempts (one row per finished attempt, for example exam = 'CEHRS_A', with the score in each domain)
 create table if not exists public.mock_attempts (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
-  exam text not null check (exam in ('CEHRS', 'CAHIMS')),
+  exam text not null check (exam ~ '^[A-Z]+_[A-Z]$'),
   score int not null,
   total int not null,
   by_domain jsonb,
@@ -41,10 +41,10 @@ create policy "own mock attempts insert" on public.mock_attempts for insert to a
 revoke all on public.mock_attempts from anon;
 grant select, insert on public.mock_attempts to authenticated;
 
--- The national exam each learner is preparing for (they choose it on their dashboard and can change it)
+-- Each learner's exam plan: EHRICO plus the national exams they add (chosen on their dashboard, changeable anytime)
 alter table public.profiles add column if not exists track text;
 alter table public.profiles drop constraint if exists profiles_track_check;
-alter table public.profiles add constraint profiles_track_check check (track is null or track in ('EHRICO', 'CEHRS', 'CAHIMS', 'BOTH', 'UNDECIDED'));
+alter table public.profiles add constraint profiles_track_check check (track is null or track ~ '^(UNDECIDED|EHRICO|[A-Z]+(,[A-Z]+)*)$');
 grant update (track) on public.profiles to authenticated;
 
 -- Shows both new tables are ready (the result appears below after you click Run)

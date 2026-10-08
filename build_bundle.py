@@ -67,7 +67,7 @@ ARE = re.compile(r"^\*\*([CK]\d+-\d+) — ([ABCD])\.\*\*[ \t]*(.+?)(?=^\*\*[CKP]
 
 
 def exam_of(ids):
-    exams = [e for e in ("CEHRS", "CAHIMS") if any(i.startswith(e) for i in ids)]
+    exams = [e for e in ("CEHRS", "CAHIMS", "CAPM") if any(i.startswith(e) for i in ids)]
     return " · ".join(exams) or "EHRICO"
 
 
@@ -102,13 +102,32 @@ def check_html(q, a, parts):
             f'<div class="mcq-fb" aria-live="polite" hidden><p class="mcq-verdict"></p><div class="mcq-explain">{explain}</div></div></section>')
 
 
-def md2html(md, keys=None, n=0, found=None):
+# ---------- Plug-and-play add-ons ----------
+# Material that only one exam needs is wrapped in the module files as
+#     <!-- addon: CAPM -->  ...markdown...  <!-- /addon -->
+# Online, only learners who chose that exam see it; in print it moves to that exam's own book.
+ADDON_RE = re.compile(r"^<!-- addon: *([A-Z]+) *-->\s*$(.*?)^<!-- /addon -->\s*$", re.S | re.M)
+
+
+def addon_spans(md):
+    return [(m.start(), m.end(), m.group(1)) for m in ADDON_RE.finditer(md)]
+
+
+def addon_divs(md):
+    return ADDON_RE.sub(lambda m: f'\n<div class="addon" data-addon="{m.group(1)}">\n\n{m.group(2).strip()}\n\n</div>\n', md)
+
+
+def md2html(md, keys=None, n=0, found=None, addon_of=None):
     md = re.sub(r"^> \[ILLUSTRATION ([A-Z0-9-]+): .*\]\s*$", figure, md, flags=re.M)
     md = md.replace('<div style="page-break-before: always;"></div>', "")
+    spans = addon_spans(md)
     qs = []
 
     def slot(m):
         qid = m.group(1)
+        for a, b, x in spans:
+            if a <= m.start() < b and addon_of is not None:
+                addon_of[qid] = x
         if keys is None or qid not in keys:
             print(f"  warning: M{n} {qid} has no answer; left as plain text")
             return m.group(0)
@@ -117,7 +136,7 @@ def md2html(md, keys=None, n=0, found=None):
         qs.append({"id": qid, "stem": m.group(2).strip(), "opts": [m.group(k) for k in range(3, 7)]})
         return f'\n<div class="mcq-slot" data-q="{qid}"></div>\n'
 
-    md = QRE.sub(slot, md)
+    md = addon_divs(QRE.sub(slot, md))
     out = pandoc(md)
     if qs:
         pieces = []
@@ -293,9 +312,9 @@ def build_module(n):
     lessons = []
 
     def add(name, ltitle, md):
-        found = []
-        body = md2html(md, keys, n, found)
-        lessons.append({"file": f"M{n:02d}/{name}", "title": ltitle, "checks": found,
+        found, addon_of = [], {}
+        body = md2html(md, keys, n, found, addon_of)
+        lessons.append({"file": f"M{n:02d}/{name}", "title": ltitle, "checks": found, "addon": addon_of,
                         "html": f"<h1>{html.escape(ltitle)}</h1>\n" + body})
 
     add("L00_start_here", f"Module {n} — Start here: outline and the problem", "\n\n".join(start))
@@ -400,7 +419,7 @@ if __name__ == "__main__":
     load_glossary()
     mods = [build_module(n) for n in range(0, 14)]
     course = [{"n": m["n"], "title": m["title"], "quiz": bool(m["quiz"]),
-               "lessons": [{"file": l["file"], "title": l["title"], "checks": l["checks"]} for l in m["lessons"]]} for m in mods]
+               "lessons": [{"file": l["file"], "title": l["title"], "checks": l["checks"], "addon": l["addon"]} for l in m["lessons"]]} for m in mods]
     res = []
     roster = os.path.join(KIT, "00_practice_emr_roster.md")
     if os.path.exists(roster):
@@ -415,14 +434,24 @@ if __name__ == "__main__":
             res.append(resource("R/" + f[:-3].lower(), t, open(p, encoding="utf-8").read().split("\n", 1)[1]))
     res.append(resource("R/glossary", "Glossary", open(os.path.join(CE, "98_glossary_v2.md"), encoding="utf-8").read().split("\n", 1)[1]))
     mocks = {}
-    for exam, minutes in (("CEHRS", 100), ("CAHIMS", 120)):
-        p = os.path.join(CE, "exams", f"{exam}_Mock_Exam_A.md")
-        if os.path.exists(p):
-            mocks[f"mock_{exam}"] = parse_mock(p, exam, minutes)
+    MINUTES = {"CEHRS": 100, "CAHIMS": 120, "CAPM": 180}
+    for p in sorted(glob.glob(os.path.join(CE, "exams", "*_Mock_Exam_?.md"))):
+        exam, form = re.match(r"([A-Z]+)_Mock_Exam_([A-Z])\.md$", os.path.basename(p)).groups()
+        mocks[f"mock_{exam}_{form}"] = parse_mock(p, exam, MINUTES.get(exam, 120))
+        mocks[f"mock_{exam}_{form}"]["form"] = form
+        mocks[f"mock_{exam}_{form}"]["title"] = f"{exam} Mock Exam {form}"
+    EXAMS = [
+        {"id": "CEHRS", "name": "CEHRS", "body": "NHA", "what": "Certified Electronic Health Records Specialist: the clinic's daily EHR work. Most students choose this one."},
+        {"id": "CAHIMS", "name": "CAHIMS", "body": "HIMSS", "what": "Certified Associate in Healthcare Information and Management Systems: health IT, projects, and management."},
+        {"id": "CAPM", "name": "CAPM", "body": "PMI", "what": "Certified Associate in Project Management: project management in PMI's terms, for implementation and project roles."},
+    ]
+    has_addon = {x for m in mods for l in m["lessons"] for x in l["addon"].values()}
+    has_addon |= {x for n in range(14) for x in re.findall(r"<!-- addon: *([A-Z]+)", open(os.path.join(CE, f"module{n:02d}_v2.md"), encoding="utf-8").read())}
+    exams = [e for e in EXAMS if any(k.startswith(f"mock_{e['id']}_") for k in mocks) or e["id"] in has_addon]
     extra = {f"kit_M{n:02d}": kit_files(n) for n in range(14)}
     extra.update(mocks)
-    extra["resources"] = {"lessons": [{"file": r["file"], "title": r["title"]} for r in res],
-                          "mocks": [{"key": k, "exam": v["exam"], "title": v["title"], "count": len(v["items"]), "minutes": v["minutes"]} for k, v in mocks.items()]}
+    extra["resources"] = {"exams": exams, "lessons": [{"file": r["file"], "title": r["title"]} for r in res],
+                          "mocks": [{"key": k[5:], "exam": v["exam"], "form": v["form"], "title": v["title"], "count": len(v["items"]), "minutes": v["minutes"]} for k, v in mocks.items()]}
     bundle = {
         "built": datetime.datetime.now().isoformat(timespec="seconds"),
         "course": course,

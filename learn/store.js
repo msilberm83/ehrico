@@ -119,7 +119,7 @@ const Store = (() => {
     // Admin only: every learner's rows (others only ever get their own).
     async adminData() {
       const [profiles, lessons, quizzes, checks, mocks] = await Promise.all([
-        all("profiles", "id, full_name, email, created_at, is_admin"),
+        all("profiles", "*"),
         all("lesson_progress", "user_id, module, read_at"),
         all("quiz_attempts", "user_id, module, score, total, taken_at"),
         all("check_answers", "user_id, module, qid, correct, first_correct").catch(() => []),

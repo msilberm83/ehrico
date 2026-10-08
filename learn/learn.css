@@ -80,3 +80,8 @@ table.score{border-collapse:collapse;width:100%;max-width:640px}table.score th,t
 .ok{color:var(--good);font-weight:700}.no{color:var(--bad);font-weight:700}
 .kitfiles ul{columns:2;column-gap:24px}@media (max-width:640px){.kitfiles ul{columns:1}}
 .mcq.optional{border-left-color:var(--gray);opacity:.92}
+/* Plug-and-play add-ons and exam plan */
+.addon{border:1px dashed var(--teal);border-radius:12px;padding:4px 14px 8px;margin:14px 0;background:color-mix(in srgb,var(--teal) 5%,var(--bg))}
+.addon-label{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--teal);margin:8px 0 4px}
+.planpick{display:grid;gap:8px;margin:10px 0}.planpick label.opt{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.planpick input{margin-top:5px;transform:scale(1.2)}

@@ -60,43 +60,61 @@ function dashboard() {
   focusMain("My course");
 }
 
-// ---------- Exam track ----------
-// Every learner takes the EHRICO course; the track says which national exam they are also preparing for.
-// Questions written in the style of the other exam stay available but are marked optional.
-const TRACKS = {
-  EHRICO: { name: "EHRICO only", what: "The EHRICO certificate, with no national exam." },
-  CEHRS: { name: "EHRICO + CEHRS", what: "Add NHA's Certified Electronic Health Records Specialist: the clinic's daily EHR work. Most students choose this one." },
-  CAHIMS: { name: "EHRICO + CAHIMS", what: "Add HIMSS's Certified Associate in Healthcare Information and Management Systems: health IT, projects, and management." },
-  BOTH: { name: "EHRICO + CEHRS + CAHIMS", what: "Add both national exams." },
-  UNDECIDED: { name: "Not sure yet", what: "Show everything; choose later." },
-};
-function trackCard() {
+// ---------- Plug-and-play exam plan ----------
+// Every learner takes the EHRICO course. They add the national exams they want; each exam's add-on
+// material (lessons, questions, mock exams) appears only for learners who added that exam.
+// The plan is saved as "UNDECIDED" (show everything), "EHRICO" (no national exam), or a list such as "CEHRS,CAPM".
+const examList = () => RES.exams || [];
+function plan() {
   const t = Store.track();
-  if (t && !trackCard.edit) return `<p class="muted">Exam track: <b>${TRACKS[t] ? TRACKS[t].name : esc(t)}</b> · <a href="#/track">Change</a></p>`;
-  return `<section class="q"><h2 style="margin-top:0">Which exams are you preparing for?</h2>
-    <p>Every student works toward the EHRICO certificate. The course also prepares you for one or both national exams, which you take separately with NHA or HIMSS. Your choice puts that exam's practice first; nothing is locked, and you can change it anytime.</p>
-    <div role="group" aria-label="Exam track">${Object.entries(TRACKS).map(([k, v]) =>
-      `<button class="opt" data-track="${k}"><b>${v.name}.</b> ${v.what}</button>`).join("")}</div></section>`;
+  if (!t || t === "UNDECIDED") return { all: true, set: new Set() };
+  if (t === "BOTH") return { all: false, set: new Set(["CEHRS", "CAHIMS"]) }; // older saved value
+  if (t === "EHRICO") return { all: false, set: new Set() };
+  return { all: false, set: new Set(t.split(",")) };
+}
+const hasExam = (x) => { const p = plan(); return p.all || p.set.has(x); };
+function planName() {
+  const t = Store.track();
+  if (!t) return "";
+  if (t === "UNDECIDED") return "Not sure yet (showing everything)";
+  const p = plan();
+  return ["EHRICO", ...[...p.set]].join(" + ");
+}
+function trackCard() {
+  if (Store.track() && !trackCard.edit) return `<p class="muted">Your exams: <b>${esc(planName())}</b> · <a href="#/track">Change</a></p>`;
+  const p = plan();
+  return `<section class="q"><h2 style="margin-top:0">Build your exam plan</h2>
+    <p>Every student earns toward the <b>EHRICO certificate</b>. Add any national exams you also want; you take those separately with the body that gives them. The material for each exam you add plugs into your course, and you can change your plan anytime.</p>
+    <div class="planpick">${examList().map((x) => `<label class="opt"><input type="checkbox" value="${x.id}" ${!p.all && p.set.has(x.id) ? "checked" : ""}> <b>${esc(x.name)}</b> (${esc(x.body)}): ${esc(x.what)}</label>`).join("")}</div>
+    <div class="pager"><button class="btn sec" data-plan="UNDECIDED">Not sure yet: show everything</button><button class="btn" data-plan="SAVE">Save my plan</button></div></section>`;
 }
 document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-track]");
+  const b = e.target.closest("[data-plan]");
   if (!b) return;
-  await Store.setTrack(b.dataset.track);
+  const picked = [...document.querySelectorAll(".planpick input:checked")].map((i) => i.value);
+  await Store.setTrack(b.dataset.plan === "UNDECIDED" ? "UNDECIDED" : picked.length ? picked.join(",") : "EHRICO");
   trackCard.edit = false;
   location.hash = "#/"; dashboard();
 });
-// A question is optional when it is written only in the style of a national exam the learner is not taking.
-// EHRICO-only learners keep every question: the EHRICO exam itself tests CEHRS-style skills and CAHIMS foundations.
+// A question outside the add-ons is marked optional only when every exam it is styled for is one the learner left out.
+// EHRICO-only learners keep every such question: the EHRICO exam itself tests CEHRS-style skills and CAHIMS foundations.
 function optionalFor(label) {
-  const t = Store.track();
-  if (!t || t === "BOTH" || t === "UNDECIDED" || t === "EHRICO" || /EHRICO/.test(label)) return false;
-  return !label.includes(t);
+  const p = plan();
+  if (p.all || !p.set.size || /EHRICO/.test(label)) return false;
+  return !examList().some((x) => label.includes(x.id) && p.set.has(x.id));
 }
-// A national mock exam is optional unless the learner's track includes that exam.
-function mockOptional(exam) {
-  const t = Store.track();
-  if (!t || t === "BOTH" || t === "UNDECIDED") return false;
-  return t !== exam;
+// Show only the add-ons for exams in the learner's plan; label the ones shown.
+function applyPlan(root) {
+  root.querySelectorAll(".addon").forEach((d) => {
+    const x = d.dataset.addon;
+    d.hidden = !hasExam(x);
+    if (!d.querySelector(":scope > .addon-label")) {
+      const l = document.createElement("p");
+      l.className = "addon-label";
+      l.textContent = `${x} add-on`;
+      d.prepend(l);
+    }
+  });
 }
 
 // Resources (roster, exam prep guide, glossary) and the mock exams, shown under the module list.
@@ -104,15 +122,17 @@ const mocksOpen = (p) => Store.isAdmin() || (COURSE.length && complete(COURSE[CO
 function resourcesBox(p) {
   if (!RES.lessons.length && !RES.mocks.length) return "";
   const last = COURSE[COURSE.length - 1];
+  const row = (m) => {
+    const b = (p.mocks || {})[m.key];
+    const st = b ? `<span class="tag${b.best >= 0.75 ? " done" : ""}">Best ${Math.round(b.best * 100)}%</span>` : `<span class="tag">${m.count} questions · ${m.minutes} min</span>`;
+    return `<li class="mod">${mocksOpen(p) ? `<a href="#/mock/${m.key}">${esc(m.title)}</a>` : `<span>${esc(m.title)}</span>`}${st}</li>`;
+  };
+  const mine = RES.mocks.filter((m) => hasExam(m.exam)), others = RES.mocks.filter((m) => !hasExam(m.exam));
   return `<h2>Resources</h2><ul class="lessons">${RES.lessons.map((r, i) => `<li><a href="#/r/${i}">${esc(r.title)}</a></li>`).join("")}</ul>
     ${RES.mocks.length ? `<h2>Mock exams</h2>
-    <p class="muted">Full-length practice for the partner exams, written to their test plans. ${mocksOpen(p) ? "" : `They open when you finish Module ${last ? last.n : 13}.`}</p>
-    <ol class="mods">${[...RES.mocks].sort((a, b) => mockOptional(a.exam) - mockOptional(b.exam)).map((m) => {
-      const b = (p.mocks || {})[m.exam];
-      const st = b ? `<span class="tag${b.best >= 0.75 ? " done" : ""}">Best ${Math.round(b.best * 100)}%</span>` : `<span class="tag">${m.count} questions · ${m.minutes} min</span>`;
-      const opt = mockOptional(m.exam) ? ` <span class="tag">Optional for your track</span>` : "";
-      return `<li class="mod">${mocksOpen(p) ? `<a href="#/mock/${m.exam}">${esc(m.title)}</a>` : `<span>${esc(m.title)}</span>`}${opt}${st}</li>`;
-    }).join("")}</ol>` : ""}`;
+    <p class="muted">Full-length practice for the national exams, written to their published outlines. ${mocksOpen(p) ? "" : `They open when you finish Module ${last ? last.n : 13}.`}</p>
+    ${mine.length ? `<ol class="mods">${mine.map(row).join("")}</ol>` : `<p class="muted">Your plan has no national exam. Add one above to see its mock exams.</p>`}
+    ${others.length ? `<details class="qmap"><summary>Mock exams for exams not in your plan (${others.length})</summary><ol class="mods">${others.map(row).join("")}</ol></details>` : ""}` : ""}`;
 }
 
 async function resourceView(i) {
@@ -123,12 +143,14 @@ async function resourceView(i) {
   try { h = await Store.lessonHtml(r.file); } catch (e) { h = null; }
   if (!h) { main.innerHTML = `<p><a href="#/">← My course</a></p><p class="fb">This page couldn't load. Reload the page in a minute.</p>`; return; }
   main.innerHTML = `<p><a href="#/">← My course</a></p><div id="reader"></div><article class="lesson">${h}</article>`;
+  applyPlan(main);
   Reader.attach(main.querySelector("article.lesson"), $("#reader"));
   focusMain(r.title);
 }
 
 // In-lesson question counts for a list of question ids: answered, and right on the first try.
-function checkStats(ids, p) {
+function checkStats(ids, p, addon) {
+  if (addon) ids = ids.filter((q) => !addon[q] || hasExam(addon[q]));
   const a = ids.map((q) => (p.checks || {})[q]).filter(Boolean);
   return { total: ids.length, answered: a.length, first: a.filter((r) => r.first_correct).length };
 }
@@ -137,12 +159,12 @@ function moduleView(n) {
   const m = byN(n), p = Store.get();
   if (!m || !unlocked(n, p)) return dashboard();
   const q = (p.quizzes || {})[n];
-  const all = checkStats(m.lessons.flatMap((l) => l.checks || []), p);
+  const all = checkStats(m.lessons.flatMap((l) => l.checks || []), p, Object.assign({}, ...m.lessons.map((l) => l.addon || {})));
   main.innerHTML = `<p><a href="#/">← My course</a></p><h1>Module ${n}: ${esc(m.title)}</h1>
     <h2>Lessons</h2>
     ${all.total ? `<p class="muted">Practice questions in the lessons: ${all.answered} of ${all.total} answered, ${all.first} right on the first try.</p>` : ""}
     <ol class="lessons">${m.lessons.map((l, i) => {
-      const c = checkStats(l.checks || [], p);
+      const c = checkStats(l.checks || [], p, l.addon);
       return `<li><a href="#/m/${n}/l/${i}">${esc(l.title)}</a> ${(p.lessons || {})[l.file] ? "✓" : ""}${c.total ? ` <span class="muted">· ${c.answered}/${c.total} questions</span>` : ""}</li>`;
     }).join("")}</ol>
     <h2>Module quiz</h2>
@@ -165,6 +187,7 @@ async function lessonView(n, i) {
     : m.quiz ? `<a class="btn" href="#/m/${n}/quiz">Take the module quiz →</a>` : `<a class="btn" href="#/m/${n}">Back to the module →</a>`;
   main.innerHTML = `<p><a href="#/m/${n}">← Module ${n}: ${esc(m.title)}</a></p><div id="reader"></div><article class="lesson">${html}</article><div class="pager">${prev}${next}</div>`;
   const art = main.querySelector("article.lesson");
+  applyPlan(art);
   setupChecks(art, n);
   if (/L97_lab_kit$/.test(l.file)) kitDownloads(art, n);
   Reader.attach(art, $("#reader"));
@@ -202,14 +225,15 @@ const mockLoad = (exam) => { try { return JSON.parse(localStorage.getItem(mockSa
 const mockStore = (exam, st) => { try { st ? localStorage.setItem(mockSaveKey(exam), JSON.stringify(st)) : localStorage.removeItem(mockSaveKey(exam)); } catch (e) { /* storage unavailable */ } };
 let mockTimer = null;
 
-async function mockView(exam) {
+async function mockView(key) {
   clearInterval(mockTimer);
   if (!mocksOpen(Store.get())) return dashboard();
   main.innerHTML = `<p class="muted">Loading…</p>`;
   let M = null;
-  try { M = await Store.courseData(`mock_${exam}`); } catch (e) { M = null; }
+  try { M = await Store.courseData(`mock_${key}`); } catch (e) { M = null; }
   if (!M || !M.items) return dashboard();
-  const saved = mockLoad(exam);
+  M.key = key;
+  const saved = mockLoad(key);
   main.innerHTML = `<p><a href="#/">← My course</a></p><h1>${esc(M.title)}</h1>
     <div class="q"><p>${M.items.length} questions. Suggested time: ${M.minutes} minutes in one sitting, with no notes. You choose answers without feedback; you see your score by domain and every explanation at the end.</p>
     <p>The course's target is <b>${Math.round(TARGET * 100)}% or better in every domain</b> before you book the real exam. That is the course's target, not the exam's published passing score.</p>
@@ -221,7 +245,7 @@ async function mockView(exam) {
 }
 
 function run(M, st) {
-  const exam = M.exam, N = M.items.length;
+  const exam = M.key, N = M.items.length;
   const tick = () => {
     if (!st.timed) return;
     const left = Math.max(0, st.ends - Date.now()), el = $("#clock");
@@ -261,7 +285,7 @@ function run(M, st) {
 }
 
 function finishMock(M, st) {
-  mockStore(M.exam, null);
+  mockStore(M.key, null);
   const by = {};
   let score = 0;
   M.items.forEach((q) => {
@@ -269,7 +293,7 @@ function finishMock(M, st) {
     d.total++;
     if (st.picks[q.n] === q.key) { d.right++; score++; }
   });
-  Store.recordMock(M.exam, score, M.items.length, by);
+  Store.recordMock(M.key, score, M.items.length, by);
   const pct = (a, b) => Math.round((a / b) * 100);
   const review = (missedOnly) => M.items.filter((q) => !missedOnly || st.picks[q.n] !== q.key).map((q) => `<div class="q">
       <p class="muted">Question ${q.n} · ${esc(q.domain)}</p>${q.stem}
@@ -454,7 +478,7 @@ async function learnersTable() {
     const mk = {};
     (d.mocks || []).filter((r) => r.user_id === p.id).forEach((r) => { const m = mk[r.exam] = mk[r.exam] || { best: 0, tries: 0 }; m.best = Math.max(m.best, r.score / r.total); m.tries++; });
     mods.forEach((m) => { const c = ck.filter((r) => r.module === m.n); m.ck = c.length; m.ckFirst = c.filter((r) => r.first_correct).length; });
-    const mockText = Object.entries(mk).map(([e, m]) => `${e} mock best ${Math.round(m.best * 100)}% (${m.tries} ${m.tries === 1 ? "try" : "tries"})`).join(" · ");
+    const mockText = (p.track ? `Plan: ${p.track.replace(/,/g, " + ")} · ` : "") + Object.entries(mk).map(([e, m]) => `${e.replace("_", " mock ")} best ${Math.round(m.best * 100)}% (${m.tries} ${m.tries === 1 ? "try" : "tries"})`).join(" · ");
     return { p, mods, doneN, read: les.length, current, last, ck: ck.length, ckFirst: ck.filter((r) => r.first_correct).length, mockText, mk };
   }).sort((a, b) => (b.last || "").localeCompare(a.last || ""));
   const learners = rows.filter((r) => !r.p.is_admin);
@@ -477,8 +501,8 @@ async function learnersTable() {
   $("#lf").addEventListener("input", (e) => draw(e.target.value.trim().toLowerCase()));
   $("#csv").addEventListener("click", () => {
     const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const head = ["Name", "Email", "Joined", "Last active", "Lessons read", "Modules complete", "Lesson questions answered", "Right first try", "CEHRS mock best %", "CAHIMS mock best %", ...COURSE.map((m) => `M${m.n} best %`)];
-    const lines = learners.map((r) => [r.p.full_name, r.p.email, day(r.p.created_at), day(r.last), r.read, r.doneN, r.ck, r.ckFirst, r.mk.CEHRS ? Math.round(r.mk.CEHRS.best * 100) : "", r.mk.CAHIMS ? Math.round(r.mk.CAHIMS.best * 100) : "",
+    const head = ["Name", "Email", "Joined", "Last active", "Lessons read", "Modules complete", "Exam plan", "Lesson questions answered", "Right first try", ...RES.mocks.map((m) => `${m.title} best %`), ...COURSE.map((m) => `M${m.n} best %`)];
+    const lines = learners.map((r) => [r.p.full_name, r.p.email, day(r.p.created_at), day(r.last), r.read, r.doneN, r.p.track || "", r.ck, r.ckFirst, ...RES.mocks.map((m) => (r.mk[m.key] ? Math.round(r.mk[m.key].best * 100) : "")),
       ...r.mods.map((m) => (m.best === null ? "" : Math.round(m.best * 100)))].map(cell).join(","));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([[head.map(cell).join(","), ...lines].join("\n")], { type: "text/csv" }));
