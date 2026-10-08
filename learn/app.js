@@ -64,16 +64,17 @@ function dashboard() {
 // Every learner takes the EHRICO course; the track says which national exam they are also preparing for.
 // Questions written in the style of the other exam stay available but are marked optional.
 const TRACKS = {
-  CEHRS: { name: "CEHRS", what: "NHA's Certified Electronic Health Records Specialist: the clinic's daily EHR work. Most students choose this one." },
-  CAHIMS: { name: "CAHIMS", what: "HIMSS's Certified Associate in Healthcare Information and Management Systems: health IT, projects, and management." },
-  BOTH: { name: "Both", what: "Prepare for CEHRS and CAHIMS." },
+  EHRICO: { name: "EHRICO only", what: "The EHRICO certificate, with no national exam." },
+  CEHRS: { name: "EHRICO + CEHRS", what: "Add NHA's Certified Electronic Health Records Specialist: the clinic's daily EHR work. Most students choose this one." },
+  CAHIMS: { name: "EHRICO + CAHIMS", what: "Add HIMSS's Certified Associate in Healthcare Information and Management Systems: health IT, projects, and management." },
+  BOTH: { name: "EHRICO + CEHRS + CAHIMS", what: "Add both national exams." },
   UNDECIDED: { name: "Not sure yet", what: "Show everything; choose later." },
 };
 function trackCard() {
   const t = Store.track();
   if (t && !trackCard.edit) return `<p class="muted">Exam track: <b>${TRACKS[t] ? TRACKS[t].name : esc(t)}</b> · <a href="#/track">Change</a></p>`;
-  return `<section class="q"><h2 style="margin-top:0">Which national exam are you preparing for?</h2>
-    <p>The EHRICO course prepares you for its own certificate and for one or both national exams. Your choice puts that exam's practice first; nothing is locked, and you can change it anytime.</p>
+  return `<section class="q"><h2 style="margin-top:0">Which exams are you preparing for?</h2>
+    <p>Every student works toward the EHRICO certificate. The course also prepares you for one or both national exams, which you take separately with NHA or HIMSS. Your choice puts that exam's practice first; nothing is locked, and you can change it anytime.</p>
     <div role="group" aria-label="Exam track">${Object.entries(TRACKS).map(([k, v]) =>
       `<button class="opt" data-track="${k}"><b>${v.name}.</b> ${v.what}</button>`).join("")}</div></section>`;
 }
@@ -84,11 +85,18 @@ document.addEventListener("click", async (e) => {
   trackCard.edit = false;
   location.hash = "#/"; dashboard();
 });
-// A question is optional for the learner when it is written only in the style of the exam they are not taking.
+// A question is optional when it is written only in the style of a national exam the learner is not taking.
+// EHRICO-only learners keep every question: the EHRICO exam itself tests CEHRS-style skills and CAHIMS foundations.
 function optionalFor(label) {
   const t = Store.track();
-  if (!t || t === "BOTH" || t === "UNDECIDED" || /EHRICO/.test(label)) return false;
+  if (!t || t === "BOTH" || t === "UNDECIDED" || t === "EHRICO" || /EHRICO/.test(label)) return false;
   return !label.includes(t);
+}
+// A national mock exam is optional unless the learner's track includes that exam.
+function mockOptional(exam) {
+  const t = Store.track();
+  if (!t || t === "BOTH" || t === "UNDECIDED") return false;
+  return t !== exam;
 }
 
 // Resources (roster, exam prep guide, glossary) and the mock exams, shown under the module list.
@@ -99,10 +107,10 @@ function resourcesBox(p) {
   return `<h2>Resources</h2><ul class="lessons">${RES.lessons.map((r, i) => `<li><a href="#/r/${i}">${esc(r.title)}</a></li>`).join("")}</ul>
     ${RES.mocks.length ? `<h2>Mock exams</h2>
     <p class="muted">Full-length practice for the partner exams, written to their test plans. ${mocksOpen(p) ? "" : `They open when you finish Module ${last ? last.n : 13}.`}</p>
-    <ol class="mods">${[...RES.mocks].sort((a, b) => optionalFor(a.exam) - optionalFor(b.exam)).map((m) => {
+    <ol class="mods">${[...RES.mocks].sort((a, b) => mockOptional(a.exam) - mockOptional(b.exam)).map((m) => {
       const b = (p.mocks || {})[m.exam];
       const st = b ? `<span class="tag${b.best >= 0.75 ? " done" : ""}">Best ${Math.round(b.best * 100)}%</span>` : `<span class="tag">${m.count} questions · ${m.minutes} min</span>`;
-      const opt = optionalFor(m.exam) ? ` <span class="tag">Optional for your track</span>` : "";
+      const opt = mockOptional(m.exam) ? ` <span class="tag">Optional for your track</span>` : "";
       return `<li class="mod">${mocksOpen(p) ? `<a href="#/mock/${m.exam}">${esc(m.title)}</a>` : `<span>${esc(m.title)}</span>`}${opt}${st}</li>`;
     }).join("")}</ol>` : ""}`;
 }

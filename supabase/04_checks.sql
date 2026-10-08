@@ -44,7 +44,7 @@ grant select, insert on public.mock_attempts to authenticated;
 -- The national exam each learner is preparing for (they choose it on their dashboard and can change it)
 alter table public.profiles add column if not exists track text;
 alter table public.profiles drop constraint if exists profiles_track_check;
-alter table public.profiles add constraint profiles_track_check check (track is null or track in ('CEHRS', 'CAHIMS', 'BOTH', 'UNDECIDED'));
+alter table public.profiles add constraint profiles_track_check check (track is null or track in ('EHRICO', 'CEHRS', 'CAHIMS', 'BOTH', 'UNDECIDED'));
 grant update (track) on public.profiles to authenticated;
 
 -- Shows both new tables are ready (the result appears below after you click Run)
