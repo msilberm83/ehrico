@@ -65,7 +65,10 @@ function dashboard() {
 // material (lessons, questions, mock exams) appears only for learners who added that exam.
 // The plan is saved as "UNDECIDED" (show everything), "EHRICO" (no national exam), or a list such as "CEHRS,CAPM".
 const examList = () => RES.exams || [];
+// One book for everyone (owner, 2026-10-07): EHRICO + CEHRS + CAHIMS, nothing hidden. Set to true to bring back exam plans.
+const PLANS_ON = false;
 function plan() {
+  if (!PLANS_ON) return { all: true, set: new Set() };
   const t = Store.track();
   if (!t || t === "UNDECIDED") return { all: true, set: new Set() };
   if (t === "BOTH") return { all: false, set: new Set(["CEHRS", "CAHIMS"]) }; // older saved value
@@ -81,6 +84,7 @@ function planName() {
   return ["EHRICO", ...[...p.set]].join(" + ");
 }
 function trackCard() {
+  if (!PLANS_ON) return "";
   if (Store.track() && !trackCard.edit) return `<p class="muted">Your exams: <b>${esc(planName())}</b> · <a href="#/track">Change</a></p>`;
   const p = plan();
   return `<section class="q"><h2 style="margin-top:0">Build your exam plan</h2>
